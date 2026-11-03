@@ -1,0 +1,742 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heart Disease Risk Classifier</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ground: #05090f;
+    --panel: #0a111b;
+    --panel-raised: #0e1724;
+    --line: rgba(140, 190, 230, 0.11);
+    --line-strong: rgba(140, 190, 230, 0.22);
+    --text: #e6eef6;
+    --text-2: #9aaec2;
+    --text-3: #71879c;
+    --low: #45dfcf;
+    --low-soft: rgba(69, 223, 207, 0.14);
+    --high: #ff5d6c;
+    --high-soft: rgba(255, 93, 108, 0.14);
+    --risk: var(--low);
+    --risk-soft: var(--low-soft);
+    --display: "Chakra Petch", "IBM Plex Sans", sans-serif;
+    --body: "IBM Plex Sans", system-ui, sans-serif;
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --radius: 14px;
+    color-scheme: dark;
+  }
+  body[data-risk="high"] { --risk: var(--high); --risk-soft: var(--high-soft); }
+
+  * { box-sizing: border-box; }
+  html { scrollbar-color: #24364a var(--ground); }
+  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar-track { background: var(--ground); }
+  ::-webkit-scrollbar-thumb { background: #1d2c3d; border-radius: 10px; border: 2px solid var(--ground); }
+  ::selection { background: rgba(69, 223, 207, 0.3); color: #fff; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background-color: var(--ground);
+    /* faint measurement grid, like ECG paper */
+    background-image:
+      linear-gradient(rgba(120, 180, 230, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(120, 180, 230, 0.035) 1px, transparent 1px);
+    background-size: 24px 24px;
+    color: var(--text);
+    font-family: var(--body);
+    font-size: 15px;
+    line-height: 1.5;
+    caret-color: var(--low);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .shell { max-width: 1240px; margin: 0 auto; padding: 32px 24px 64px; }
+
+  /* Header */
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: clamp(1.6rem, 1.1rem + 1.6vw, 2.4rem);
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+  .subtitle { margin: 0; color: var(--text-2); }
+  .stats { display: flex; gap: 28px; margin: 0; }
+  .stats div { display: flex; flex-direction: column-reverse; }
+  .stats dt { color: var(--text-3); font-size: 12.5px; }
+  .stats dd {
+    margin: 0;
+    font-family: var(--display);
+    font-size: 1.35rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ECG strip: redraws in the risk colour every time a new result arrives */
+  .ecg { margin: 22px 0 28px; height: 56px; position: relative; }
+  .ecg svg { width: 100%; height: 100%; display: block; overflow: visible; }
+  .ecg .trace-base { stroke: var(--line-strong); }
+  .ecg .trace-live {
+    stroke: var(--risk);
+    filter: drop-shadow(0 0 6px var(--risk-soft)) drop-shadow(0 2px 10px var(--risk-soft));
+    transition: stroke 500ms ease;
+  }
+  .ecg.sweep .trace-live { animation: sweep 1300ms var(--ease-out) both; }
+  @keyframes sweep { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+
+  /* Layout */
+  main {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+    gap: 24px;
+    align-items: start;
+  }
+  .panel {
+    background: linear-gradient(180deg, var(--panel-raised), var(--panel));
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: 0 24px 48px -24px rgba(0, 0, 0, 0.7);
+  }
+
+  /* Form */
+  form { padding: 8px 28px 28px; }
+  .form-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 20px 0 8px;
+  }
+  h2 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 1.3rem;
+    margin: 0;
+  }
+  .presets { display: flex; gap: 8px; flex-wrap: wrap; }
+  .ghost {
+    font: inherit;
+    font-size: 13.5px;
+    color: var(--text-2);
+    background: transparent;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    padding: 6px 14px;
+    cursor: pointer;
+    transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
+  }
+  .ghost:hover { color: var(--text); border-color: rgba(140, 190, 230, 0.4); background: rgba(140, 190, 230, 0.05); }
+
+  fieldset.group { border: 0; margin: 0; padding: 18px 0 0; min-width: 0; }
+  fieldset.group + fieldset.group { border-top: 1px solid var(--line); margin-top: 26px; padding-top: 22px; }
+  .group > legend {
+    float: left;  /* takes the legend out of the fieldset border so it behaves like a normal heading */
+    width: 100%;
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: 1rem;
+    color: var(--text);
+    padding: 0;
+    margin: 0;
+  }
+  .field { clear: both; padding-top: 12px; }
+  .field-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .field-name { font-weight: 500; font-size: 14px; }
+  .hint { color: var(--text-3); font-size: 13px; margin: 2px 0 10px; max-width: 62ch; }
+
+  /* Segmented control built from real radio inputs (keyboard + screen-reader friendly) */
+  .segmented {
+    display: grid;
+    grid-auto-columns: 1fr;
+    grid-auto-flow: column;
+    gap: 4px;
+    padding: 4px;
+    border-radius: 11px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--line);
+  }
+  .segmented label { position: relative; display: block; }
+  .segmented input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .segmented span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    min-height: 40px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    font-size: 13.5px;
+    color: var(--text-2);
+    transition: background 180ms ease, color 180ms ease, box-shadow 180ms ease;
+    user-select: none;
+  }
+  .segmented label:hover span { color: var(--text); background: rgba(140, 190, 230, 0.06); }
+  .segmented input:checked + span {
+    color: #04140f;
+    background: var(--low);
+    font-weight: 600;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  }
+  .segmented input:focus-visible + span { outline: 2px solid var(--low); outline-offset: 2px; }
+
+  /* Slider */
+  .readout {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 1.05rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--low);
+  }
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 32px;
+    background: transparent;
+    cursor: pointer;
+    margin: 0;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 6px;
+    background: linear-gradient(90deg, var(--low) var(--fill, 0%), rgba(140, 190, 230, 0.14) var(--fill, 0%));
+  }
+  input[type="range"]::-moz-range-track { height: 6px; border-radius: 6px; background: rgba(140, 190, 230, 0.14); }
+  input[type="range"]::-moz-range-progress { height: 6px; border-radius: 6px; background: var(--low); }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px; height: 20px;
+    margin-top: -7px;
+    border-radius: 50%;
+    background: var(--ground);
+    border: 3px solid var(--low);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--ground);
+    border: 3px solid var(--low);
+  }
+  input[type="range"]:focus-visible { outline: 2px solid var(--low); outline-offset: 4px; border-radius: 6px; }
+  .scale { display: flex; justify-content: space-between; color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+  /* Result */
+  .result { position: sticky; top: 20px; padding: 24px 28px 26px; }
+  .gauge-wrap { position: relative; width: min(100%, 300px); margin: 6px auto 0; aspect-ratio: 1; }
+  .gauge-wrap svg { width: 100%; height: 100%; display: block; overflow: visible; }
+  .track { stroke: rgba(140, 190, 230, 0.1); }
+  .value-arc {
+    stroke: var(--risk);
+    transition: stroke 500ms ease;
+    filter: drop-shadow(0 0 10px var(--risk-soft)) drop-shadow(0 4px 18px var(--risk-soft));
+  }
+  .tick { stroke: var(--text); stroke-width: 2; }
+  .tick-label { fill: var(--text-2); font: 500 12px var(--body); }
+  .gauge-center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding-top: 8px;
+  }
+  .prob {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: clamp(2.6rem, 2rem + 2vw, 3.6rem);
+    line-height: 1;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    transition: opacity 200ms ease;
+  }
+  .prob small { font-size: 0.5em; margin-left: 2px; color: var(--text-2); }
+  .prob-label { color: var(--text-2); font-size: 13.5px; margin-top: 8px; }
+  .result[aria-busy="true"] .prob { opacity: 0.55; }
+
+  .verdict {
+    margin: 4px 0 0;
+    padding: 14px 16px;
+    border-radius: 11px;
+    background: var(--risk-soft);
+    border: 1px solid color-mix(in srgb, var(--risk) 35%, transparent);
+    transition: background 500ms ease, border-color 500ms ease;
+  }
+  .verdict strong {
+    display: block;
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 1.15rem;
+    color: var(--risk);
+    transition: color 500ms ease;
+  }
+  .verdict p { margin: 2px 0 0; color: var(--text-2); font-size: 13.5px; }
+
+  .drivers { margin-top: 26px; }
+  .drivers h3 { font-family: var(--display); font-weight: 600; font-size: 1rem; margin: 0; }
+  .drivers .hint { margin-bottom: 14px; }
+  .driver {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 46px;
+    align-items: center;
+    gap: 12px;
+    padding: 7px 0;
+    font-size: 13.5px;
+    line-height: 1.3;
+  }
+  .driver-name { color: var(--text); }
+  .bar { position: relative; height: 10px; }
+  .bar::before { content: ""; position: absolute; left: 50%; top: -4px; bottom: -4px; width: 1px; background: var(--line-strong); }
+  .bar i {
+    position: absolute;
+    top: 0; bottom: 0;
+    border-radius: 3px;
+    transition: width 700ms var(--ease-out), left 700ms var(--ease-out);
+  }
+  .bar i.up { left: 50%; background: var(--high); }
+  .bar i.down { background: var(--low); }
+  .driver-value { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-2); }
+  .legend { display: flex; justify-content: space-between; color: var(--text-3); font-size: 12px; margin-top: 6px; padding: 0 calc(46px + 12px) 0 0; }
+  .legend span:first-child { margin-left: auto; margin-right: 18%; }
+
+  .error {
+    display: none;
+    margin-top: 16px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: rgba(255, 93, 108, 0.1);
+    border: 1px solid rgba(255, 93, 108, 0.35);
+    color: #ffc2c8;
+    font-size: 13.5px;
+  }
+  .error.show { display: block; }
+
+  footer { margin-top: 28px; color: var(--text-3); font-size: 12.5px; max-width: 75ch; }
+
+  /* Mobile: result moves below the form, with a sticky summary bar */
+  .mobile-bar { display: none; }
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; }
+    .result { position: static; }
+    .shell { padding: 24px 16px 96px; }
+    form { padding: 4px 18px 22px; }
+    .result { padding: 20px 18px; }
+    .stats { gap: 20px; }
+    .mobile-bar {
+      display: flex;
+      position: fixed;
+      left: 12px; right: 12px; bottom: 12px;
+      z-index: 10;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 16px;
+      border-radius: 14px;
+      background: rgba(10, 17, 27, 0.92);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--line-strong);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+      color: var(--text);
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+      transition: opacity 250ms ease, transform 350ms var(--ease-out);
+    }
+    .mobile-bar.hidden { opacity: 0; transform: translateY(16px); pointer-events: none; }
+    .mobile-bar b { font-family: var(--display); font-size: 1.4rem; font-variant-numeric: tabular-nums; }
+    .mobile-bar span { color: var(--risk); font-weight: 600; font-size: 14px; }
+  }
+  @media (max-width: 560px) {
+    .segmented.wrap4 { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; }
+  }
+</style>
+</head>
+<body data-risk="low">
+<div class="shell">
+
+  <header>
+    <div>
+      <h1>Heart Disease Risk Classifier</h1>
+      <p class="subtitle">Logistic regression on <span id="n-features">-</span> clinical features, trained on <span id="n-patients">-</span> patients</p>
+    </div>
+    <dl class="stats" aria-label="Model performance on the held-out test set">
+      <div><dt>Recall</dt><dd id="stat-recall">-</dd></div>
+      <div><dt>ROC-AUC</dt><dd id="stat-auc">-</dd></div>
+      <div><dt>Flag threshold</dt><dd id="stat-threshold">-</dd></div>
+    </dl>
+  </header>
+
+  <div class="ecg" id="ecg" aria-hidden="true">
+    <svg viewBox="0 0 1200 56" preserveAspectRatio="none">
+      <path class="trace-base" id="trace-base" fill="none" stroke-width="1.2" vector-effect="non-scaling-stroke"/>
+      <path class="trace-live" id="trace-live" fill="none" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+    </svg>
+  </div>
+
+  <main>
+    <form class="panel" id="patient-form" novalidate>
+      <div class="form-top">
+        <h2>Patient</h2>
+        <div class="presets">
+          <button type="button" class="ghost" data-preset="low">Low-risk example</button>
+          <button type="button" class="ghost" data-preset="high">High-risk example</button>
+          <button type="button" class="ghost" data-preset="reset">Reset</button>
+        </div>
+      </div>
+      <div id="fields"></div>
+    </form>
+
+    <section class="panel result" id="result" aria-live="polite" aria-busy="false" aria-labelledby="result-title">
+      <h2 id="result-title">Prediction</h2>
+
+      <div class="gauge-wrap">
+        <svg viewBox="0 0 240 240" role="img" aria-labelledby="prob-text">
+          <circle class="track" cx="120" cy="120" r="96" fill="none" stroke-width="14" stroke-linecap="round"
+                  pathLength="100" stroke-dasharray="75 100" transform="rotate(135 120 120)"/>
+          <circle class="value-arc" id="value-arc" cx="120" cy="120" r="96" fill="none" stroke-width="14" stroke-linecap="round"
+                  pathLength="100" stroke-dasharray="0 100" transform="rotate(135 120 120)"/>
+          <line class="tick" id="tick"/>
+          <text class="tick-label" id="tick-label" text-anchor="middle"></text>
+        </svg>
+        <div class="gauge-center">
+          <div class="prob" id="prob-text">--<small>%</small></div>
+          <div class="prob-label">chance of heart disease</div>
+        </div>
+      </div>
+
+      <div class="verdict" id="verdict">
+        <strong id="verdict-title">Waiting for input</strong>
+        <p id="verdict-text">Choose the patient's values to get a prediction.</p>
+      </div>
+
+      <div class="error" id="error" role="alert"></div>
+
+      <div class="drivers">
+        <h3>What drove this prediction</h3>
+        <p class="hint">Each bar shows how much a feature moves the risk compared with the average patient (change in log-odds).</p>
+        <div id="driver-list"></div>
+        <div class="legend"><span>lowers risk</span><span>raises risk</span></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Model trained <span id="trained-at">-</span>. A learning project built on data from one hospital (Cleveland, 1988). It is not a medical device and must not be used to diagnose anyone.
+  </footer>
+</div>
+
+<button type="button" class="mobile-bar" id="mobile-bar" aria-label="Jump to prediction">
+  <b id="mobile-prob">--%</b><span id="mobile-verdict">Waiting for input</span>
+</button>
+
+<script>
+// Form definition: all 13 possible inputs, their dataset codes, and a short explanation.
+// The form only shows the inputs the current model needs (from /api/model-info), so a
+// retrained model that picks different features gets the right form automatically.
+const FIELDS = [
+  { group: 'Demographics', items: [
+    { name: 'age', label: 'Age', type: 'range', min: 20, max: 90, step: 1, unit: 'years' },
+    { name: 'sex', label: 'Sex', options: [[0, 'Female'], [1, 'Male']] }
+  ]},
+  { group: 'Symptoms', items: [
+    { name: 'cp', label: 'Chest pain type', wrap: true,
+      hint: 'Asymptomatic means no chest pain reported. Surprisingly, it is one of the strongest risk signals in this data.',
+      options: [[1, 'Typical angina'], [2, 'Atypical angina'], [3, 'Non-anginal'], [4, 'Asymptomatic']] }
+  ]},
+  { group: 'Vitals and blood tests', items: [
+    { name: 'trestbps', label: 'Resting blood pressure', type: 'range', min: 90, max: 200, step: 1, unit: 'mm Hg' },
+    { name: 'chol', label: 'Serum cholesterol', type: 'range', min: 120, max: 570, step: 1, unit: 'mg/dl' },
+    { name: 'fbs', label: 'Fasting blood sugar above 120 mg/dl', options: [[0, 'No'], [1, 'Yes']] }
+  ]},
+  { group: 'Resting ECG', items: [
+    { name: 'restecg', label: 'Resting ECG result',
+      options: [[0, 'Normal'], [1, 'ST-T abnormality'], [2, 'LV hypertrophy']] }
+  ]},
+  { group: 'Exercise stress test', items: [
+    { name: 'thalach', label: 'Maximum heart rate reached', type: 'range', min: 70, max: 205, step: 1, unit: 'bpm' },
+    { name: 'exang', label: 'Chest pain during exercise', options: [[0, 'No'], [1, 'Yes']] },
+    { name: 'oldpeak', label: 'ST depression', type: 'range', min: 0, max: 6.2, step: 0.1, unit: 'mm',
+      hint: 'How far the ST segment drops during exercise compared with rest, in mm.' },
+    { name: 'slope', label: 'Peak ST segment slope',
+      options: [[1, 'Upsloping'], [2, 'Flat'], [3, 'Downsloping']] }
+  ]},
+  { group: 'Imaging', items: [
+    { name: 'ca', label: 'Major vessels narrowed (fluoroscopy)',
+      options: [[0, '0'], [1, '1'], [2, '2'], [3, '3']] },
+    { name: 'thal', label: 'Thallium stress scan',
+      options: [[3, 'Normal'], [6, 'Fixed defect'], [7, 'Reversible defect']] }
+  ]}
+];
+const FIELD_BY_NAME = Object.fromEntries(FIELDS.flatMap((section) => section.items).map((item) => [item.name, item]));
+
+const PRESETS = {
+  reset: { age: 54, sex: 1, cp: 3, trestbps: 130, chol: 240, fbs: 0, restecg: 0, thalach: 150, exang: 0, oldpeak: 1.0, slope: 1, ca: 0, thal: 3 },
+  low:   { age: 42, sex: 0, cp: 3, trestbps: 120, chol: 210, fbs: 0, restecg: 0, thalach: 172, exang: 0, oldpeak: 0.0, slope: 1, ca: 0, thal: 3 },
+  high:  { age: 63, sex: 1, cp: 4, trestbps: 150, chol: 290, fbs: 1, restecg: 2, thalach: 118, exang: 1, oldpeak: 2.5, slope: 2, ca: 2, thal: 7 }
+};
+
+const state = { ...PRESETS.reset };
+let neededInputs = [];  // filled from /api/model-info
+const $ = (id) => document.getElementById(id);
+
+// Build the form for the inputs this model needs
+function buildForm(inputs) {
+  neededInputs = inputs;
+  const fieldsEl = $('fields');
+  fieldsEl.innerHTML = '';
+  for (const section of FIELDS) {
+    const items = section.items.filter((item) => inputs.includes(item.name));
+    if (!items.length) continue;
+
+    const fs = document.createElement('fieldset');
+    fs.className = 'group';
+    fs.innerHTML = `<legend>${section.group}</legend>`;
+
+    for (const item of items) {
+      const field = document.createElement('div');
+      field.className = 'field';
+      const hint = item.hint ? `<p class="hint" id="hint-${item.name}">${item.hint}</p>` : '';
+
+      if (item.type === 'range') {
+        field.innerHTML = `
+          <div class="field-head">
+            <label class="field-name" for="in-${item.name}">${item.label}</label>
+            <span class="readout" id="readout-${item.name}"></span>
+          </div>
+          ${hint || '<div style="height:4px"></div>'}
+          <input type="range" id="in-${item.name}" name="${item.name}" min="${item.min}" max="${item.max}" step="${item.step}"
+                 ${item.hint ? `aria-describedby="hint-${item.name}"` : ''}>
+          <div class="scale"><span>${item.min} ${item.unit}</span><span>${item.max} ${item.unit}</span></div>`;
+      } else {
+        const options = item.options.map(([value, text]) => `
+          <label><input type="radio" name="${item.name}" value="${value}"><span>${text}</span></label>`).join('');
+        field.innerHTML = `
+          <div class="field-head"><span class="field-name" id="label-${item.name}">${item.label}</span></div>
+          ${hint || '<div style="height:10px"></div>'}
+          <div class="segmented${item.wrap ? ' wrap4' : ''}" role="radiogroup" aria-labelledby="label-${item.name}"
+               ${item.hint ? `aria-describedby="hint-${item.name}"` : ''}>${options}</div>`;
+      }
+      fs.appendChild(field);
+    }
+    fieldsEl.appendChild(fs);
+  }
+}
+
+function syncForm() {
+  for (const name of neededInputs) {
+    if (FIELD_BY_NAME[name].type === 'range') {
+      const slider = $(`in-${name}`);
+      slider.value = state[name];
+      updateSlider(slider);
+    } else {
+      const radio = document.querySelector(`input[name="${name}"][value="${state[name]}"]`);
+      if (radio) radio.checked = true;
+    }
+  }
+}
+
+function updateSlider(slider) {
+  const item = FIELD_BY_NAME[slider.name];
+  const pct = ((slider.value - slider.min) / (slider.max - slider.min)) * 100;
+  slider.style.setProperty('--fill', pct + '%');
+  $(`readout-${item.name}`).textContent = Number(slider.value).toFixed(item.step < 1 ? 1 : 0) + ' ' + item.unit;
+}
+
+$('patient-form').addEventListener('input', (event) => {
+  const input = event.target;
+  if (input.type === 'range') {
+    state[input.name] = Number(input.value);
+    updateSlider(input);
+    schedulePredict(140);
+  } else if (input.type === 'radio') {
+    state[input.name] = Number(input.value);
+    schedulePredict(0);
+  }
+});
+
+document.querySelectorAll('[data-preset]').forEach((button) => {
+  button.addEventListener('click', () => {
+    Object.assign(state, PRESETS[button.dataset.preset]);
+    syncForm();
+    schedulePredict(0);
+  });
+});
+
+$('mobile-bar').addEventListener('click', () => $('result').scrollIntoView({ behavior: 'smooth', block: 'start' }));
+
+// Hide the mobile summary bar while the full prediction panel is on screen
+new IntersectionObserver(([entry]) => {
+  $('mobile-bar').classList.toggle('hidden', entry.isIntersecting);
+}, { threshold: 0.15 }).observe($('result'));
+
+// ECG trace: a repeating heartbeat (P wave, QRS spike, T wave)
+function buildEcgPath() {
+  const base = 34, beat = 150;
+  let d = `M0 ${base}`;
+  for (let x = 0; x < 1200; x += beat) {
+    d += ` L${x + 30} ${base} Q${x + 38} ${base - 6} ${x + 46} ${base}` +           // P wave
+         ` L${x + 58} ${base} L${x + 62} ${base + 5} L${x + 68} 4 L${x + 74} 52 L${x + 79} ${base}` +  // QRS
+         ` L${x + 92} ${base} Q${x + 104} ${base - 11} ${x + 116} ${base} L${x + beat} ${base}`;  // T wave
+  }
+  return d;
+}
+const ecgPath = buildEcgPath();
+$('trace-base').setAttribute('d', ecgPath);
+const live = $('trace-live');
+live.setAttribute('d', ecgPath);
+const ecgLength = live.getTotalLength();
+live.style.strokeDasharray = ecgLength;
+live.style.setProperty('--len', ecgLength);
+
+function sweepEcg() {
+  const ecg = $('ecg');
+  ecg.classList.remove('sweep');
+  void ecg.offsetWidth;  // restart the animation
+  ecg.classList.add('sweep');
+}
+
+// Gauge threshold tick
+function placeThresholdTick(threshold) {
+  const angle = (135 + 270 * threshold) * Math.PI / 180;
+  const point = (r) => [120 + r * Math.cos(angle), 120 + r * Math.sin(angle)];
+  const [x1, y1] = point(84), [x2, y2] = point(110), [lx, ly] = point(128);
+  $('tick').setAttribute('x1', x1); $('tick').setAttribute('y1', y1);
+  $('tick').setAttribute('x2', x2); $('tick').setAttribute('y2', y2);
+  $('tick-label').setAttribute('x', lx);
+  $('tick-label').setAttribute('y', ly + 4);
+  $('tick-label').textContent = Math.round(threshold * 100) + '%';
+}
+
+// Animated gauge: the number and the arc move together, frame by frame
+let shownProb = 0, animationId = null;
+function animateGauge(target) {
+  const start = shownProb, startTime = performance.now(), duration = 900;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  cancelAnimationFrame(animationId);
+  function frame(now) {
+    const t = reduce ? 1 : Math.min(1, (now - startTime) / duration);
+    const eased = 1 - Math.pow(2, -10 * t);
+    shownProb = start + (target - start) * (t === 1 ? 1 : eased);
+    $('prob-text').innerHTML = formatProb(shownProb) + '<small>%</small>';
+    $('value-arc').setAttribute('stroke-dasharray', `${Math.max(0.01, shownProb * 75)} 100`);  // the arc spans 75 of 100 units
+    if (t < 1) animationId = requestAnimationFrame(frame);
+  }
+  animationId = requestAnimationFrame(frame);
+}
+const formatProb = (p) => (p * 100).toFixed(1);
+
+// Contribution bars
+const BAR_SCALE = 1.8;  // log-odds that fill half the bar
+function renderDrivers(contributions) {
+  const scale = Math.max(BAR_SCALE, ...contributions.map((c) => Math.abs(c.contribution)));
+  $('driver-list').innerHTML = contributions.map((c) => {
+    const width = (Math.abs(c.contribution) / scale) * 50;
+    const up = c.contribution > 0;
+    const style = up ? `width:${width}%` : `width:${width}%;left:${50 - width}%`;
+    const sign = up ? '+' : '';
+    return `<div class="driver">
+      <span class="driver-name" title="${c.label}">${c.label}</span>
+      <span class="bar"><i class="${up ? 'up' : 'down'}" style="${style}"></i></span>
+      <span class="driver-value">${sign}${c.contribution.toFixed(2)}</span>
+    </div>`;
+  }).join('');
+}
+
+// Talk to the Flask API
+let timer = null, controller = null, threshold = 0.5;  // replaced by the model's threshold at start-up
+function schedulePredict(delay) {
+  clearTimeout(timer);
+  timer = setTimeout(predict, delay);
+}
+
+async function predict() {
+  if (controller) controller.abort();
+  controller = new AbortController();
+  $('result').setAttribute('aria-busy', 'true');
+  try {
+    const response = await fetch('/api/predict', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.fromEntries(neededInputs.map((name) => [name, state[name]]))),
+      signal: controller.signal
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error((data.errors || ['The server rejected the input.']).join(' '));
+    showResult(data);
+    $('error').classList.remove('show');
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    $('error').textContent = error instanceof TypeError
+      ? "Can't reach the model server. Check that 'python app.py' is still running, then change any value to retry."
+      : error.message;
+    $('error').classList.add('show');
+  } finally {
+    $('result').setAttribute('aria-busy', 'false');
+  }
+}
+
+function showResult(data) {
+  const high = data.risk === 'high';
+  const pct = Math.round(data.threshold * 100);
+  document.body.dataset.risk = data.risk;
+
+  animateGauge(data.probability);
+
+  $('verdict-title').textContent = high ? 'High risk' : 'Low risk';
+  $('verdict-text').textContent = high
+    ? `Above the ${pct}% flag threshold. In practice this patient would be referred for follow-up testing.`
+    : `Below the ${pct}% flag threshold. The model would not flag this patient.`;
+
+  $('mobile-prob').textContent = formatProb(data.probability) + '%';
+  $('mobile-verdict').textContent = high ? 'High risk' : 'Low risk';
+
+  renderDrivers(data.contributions);
+  sweepEcg();
+}
+
+// Start-up: ask the server which model is loaded, then build the matching form
+fetch('/api/model-info')
+  .then((r) => r.json())
+  .then((info) => {
+    threshold = info.threshold;
+    placeThresholdTick(threshold);
+    $('n-features').textContent = info.features.length;
+    $('n-patients').textContent = info.n_patients;
+    $('trained-at').textContent = info.trained_at.replace('T', ' ');
+    $('stat-recall').textContent = (info.test_metrics.recall * 100).toFixed(1) + '%';
+    $('stat-auc').textContent = info.test_metrics.roc_auc.toFixed(3);
+    $('stat-threshold').textContent = Math.round(info.threshold * 100) + '%';
+
+    buildForm(info.raw_features);
+    syncForm();
+    predict();
+  })
+  .catch(() => {
+    $('error').textContent = "Can't load the model from the server. Check that 'python app.py' is running, then reload the page.";
+    $('error').classList.add('show');
+  });
+</script>
+</body>
+</html>
